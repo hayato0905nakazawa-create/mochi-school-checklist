@@ -1,6 +1,10 @@
 const $app = document.querySelector('#app');
 const $toast = document.querySelector('#toast');
 
+const API_BASE = 'https://sjgijtwakgsehlmwbxks.supabase.co/functions/v1/api';
+const AUTH_KEY = 'mochi_session_token';
+const VAPID_KEY_STORE = 'mochi_vapid_public_key';
+
 const state = {
   user: null,
   view: 'list',
@@ -11,12 +15,17 @@ const state = {
 };
 
 const api = async (url, options = {}) => {
-  const res = await fetch(url, {
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  const token = localStorage.getItem(AUTH_KEY);
+  const res = await fetch(API_BASE + url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
     ...options,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && url !== '/login') localStorage.removeItem(AUTH_KEY);
   if (!res.ok) throw new Error(data.error || 'エラーが発生しました');
   return data;
 };
@@ -54,7 +63,7 @@ async function boot() {
     try { state.swReg = await navigator.serviceWorker.register('/sw.js'); } catch {}
   }
   try {
-    const me = await api('/api/me');
+    const me = await api('/me');
     state.user = me;
     await detectPush();
     await loadTasks();
@@ -66,23 +75,35 @@ async function boot() {
 
 async function detectPush() {
   if (!state.swReg || !('PushManager' in window)) return;
-  const sub = await state.swReg.pushManager.getSubscription();
-  state.pushEnabled = !!sub;
+  let sub = await state.swReg.pushManager.getSubscription();
   if (sub && state.user) {
     try {
-      await api('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
-    } catch {}
+      const { publicKey } = await api('/push/public-key');
+      const savedKey = localStorage.getItem(VAPID_KEY_STORE);
+      if (savedKey !== publicKey) {
+        await sub.unsubscribe();
+        sub = await state.swReg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+        localStorage.setItem(VAPID_KEY_STORE, publicKey);
+      }
+      await api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+    } catch {
+      sub = null;
+    }
   }
+  state.pushEnabled = !!sub;
 }
 
 async function loadTasks() {
   const date = state.day === 'today' ? localDate(0) : localDate(1);
-  const { tasks } = await api(`/api/tasks?date=${encodeURIComponent(date)}`);
+  const { tasks } = await api(`/tasks?date=${encodeURIComponent(date)}`);
   state.tasks = tasks;
 }
 
 async function renderAuth() {
-  const status = await api('/api/status').catch(() => ({ hasUsers: true, signupOpen: false }));
+  const status = await api('/status').catch(() => ({ hasUsers: true, signupOpen: false }));
   const first = !status.hasUsers;
   $app.innerHTML = `
     <section class="auth-wrap">
@@ -112,8 +133,9 @@ async function renderAuth() {
     btn.disabled = true;
     document.querySelector('#authError').textContent = '';
     try {
-      await api(first ? '/api/register' : '/api/login', { method: 'POST', body: JSON.stringify(body) });
-      state.user = await api('/api/me');
+      const result = await api(first ? '/register' : '/login', { method: 'POST', body: JSON.stringify(body) });
+      if (result.token) localStorage.setItem(AUTH_KEY, result.token);
+      state.user = await api('/me');
       await detectPush();
       await loadTasks();
       render();
@@ -188,7 +210,7 @@ function renderList() {
     task.done = !task.done;
     render();
     try {
-      await api(`/api/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ done: task.done }) });
+      await api(`/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ done: task.done }) });
     } catch (err) { task.done = !task.done; toast(err.message); await loadTasks(); render(); }
   }));
   document.querySelectorAll('[data-action="menu"]').forEach(btn => btn.addEventListener('click', e => {
@@ -234,7 +256,7 @@ function openAddSheet() {
     const btn = e.currentTarget.querySelector('.primary');
     btn.disabled = true;
     try {
-      await api('/api/tasks', { method: 'POST', body: JSON.stringify({
+      await api('/tasks', { method: 'POST', body: JSON.stringify({
         text: wrap.querySelector('#taskText').value,
         date: dateInput.value,
         time: wrap.querySelector('#taskTime').value,
@@ -259,7 +281,7 @@ function openTaskSheet(task) {
     <button id="deleteTask" class="secondary danger">削除</button>`);
   wrap.querySelector('#deleteTask').addEventListener('click', async () => {
     try {
-      await api(`/api/tasks/${task.id}`, { method: 'DELETE' });
+      await api(`/tasks/${task.id}`, { method: 'DELETE' });
       wrap.remove();
       await loadTasks();
       render();
@@ -287,14 +309,15 @@ function renderSettings() {
   if (canPush) document.querySelector('#pushBtn').addEventListener('click', togglePush);
   document.querySelector('#testPushBtn').addEventListener('click', async () => {
     try {
-      const result = await api('/api/push/test', { method: 'POST', body: '{}' });
+      const result = await api('/push/test', { method: 'POST', body: '{}' });
       toast(`テスト通知を送信しました（${result.sent}台）`);
     } catch (err) {
       toast(err.message);
     }
   });
   document.querySelector('#logoutBtn').addEventListener('click', async () => {
-    await api('/api/logout', { method: 'POST', body: '{}' });
+    try { await api('/logout', { method: 'POST', body: '{}' }); } catch {}
+    localStorage.removeItem(AUTH_KEY);
     state.user = null;
     state.tasks = [];
     renderAuth();
@@ -306,16 +329,18 @@ async function togglePush() {
     if (!state.swReg) throw new Error('通知を利用できません');
     const current = await state.swReg.pushManager.getSubscription();
     if (current) {
-      await api('/api/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint: current.endpoint }) });
+      await api('/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint: current.endpoint }) });
       await current.unsubscribe();
+      localStorage.removeItem(VAPID_KEY_STORE);
       state.pushEnabled = false;
       toast('通知をOFFにしました');
     } else {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') throw new Error('通知が許可されていません');
-      const { publicKey } = await api('/api/push/public-key');
+      const { publicKey } = await api('/push/public-key');
       const sub = await state.swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
-      await api('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+      await api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+      localStorage.setItem(VAPID_KEY_STORE, publicKey);
       state.pushEnabled = true;
       toast('通知をONにしました');
     }
