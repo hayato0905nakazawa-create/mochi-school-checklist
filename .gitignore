@@ -1,0 +1,6 @@
+node_modules/
+data/db.json
+data/secret.txt
+data/vapid.json
+.env
+.DS_Store
