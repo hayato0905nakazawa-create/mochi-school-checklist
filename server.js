@@ -256,6 +256,38 @@ app.delete('/api/push/subscribe', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/push/test', auth, async (req, res) => {
+  const db = loadDb();
+  const userSubs = db.subscriptions.filter(s => s.userId === req.user.id);
+  if (!userSubs.length) return res.status(400).json({ error: '通知先がサーバーに登録されていません' });
+
+  const payload = JSON.stringify({
+    title: 'Mochi 通知テスト',
+    body: '通知テスト成功！',
+    taskId: 'test-' + Date.now(),
+  });
+
+  let sent = 0;
+  let changed = false;
+  let lastStatus = null;
+  for (const sub of userSubs) {
+    try {
+      await webpush.sendNotification(sub.subscription, payload);
+      sent += 1;
+    } catch (err) {
+      lastStatus = err.statusCode || null;
+      console.error('push test error:', err.statusCode || '', err.message);
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        db.subscriptions = db.subscriptions.filter(s => s.id !== sub.id);
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveDb(db);
+  if (!sent) return res.status(502).json({ error: `通知送信に失敗しました${lastStatus ? ` (${lastStatus})` : ''}` });
+  res.json({ ok: true, sent });
+});
+
 function tokyoParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'

@@ -68,6 +68,11 @@ async function detectPush() {
   if (!state.swReg || !('PushManager' in window)) return;
   const sub = await state.swReg.pushManager.getSubscription();
   state.pushEnabled = !!sub;
+  if (sub && state.user) {
+    try {
+      await api('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+    } catch {}
+  }
 }
 
 async function loadTasks() {
@@ -276,9 +281,18 @@ function renderSettings() {
         <div><div class="setting-main">ログインID</div><div class="setting-sub">${escapeHtml(state.user.username)}</div></div>
       </div>
     </div>
+    <button id="testPushBtn" class="secondary">テスト通知を送る</button>
     <button id="logoutBtn" class="secondary logout">ログアウト</button>
     <div class="note">iPhoneで通知を使う場合は、Safariでこのサイトを「ホーム画面に追加」してから通知をONにしてください。</div>`;
   if (canPush) document.querySelector('#pushBtn').addEventListener('click', togglePush);
+  document.querySelector('#testPushBtn').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/push/test', { method: 'POST', body: '{}' });
+      toast(`テスト通知を送信しました（${result.sent}台）`);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
   document.querySelector('#logoutBtn').addEventListener('click', async () => {
     await api('/api/logout', { method: 'POST', body: '{}' });
     state.user = null;
