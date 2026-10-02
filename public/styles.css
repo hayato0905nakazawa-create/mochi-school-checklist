@@ -111,3 +111,18 @@ button { -webkit-tap-highlight-color: transparent; }
   .content, .topbar { padding-left: 158px; }
   .app-shell { padding-bottom: 40px; }
 }
+
+.prefs-form { margin-top: 14px; }
+.prefs-save { margin-top: 12px; }
+.account-card { margin: 14px 0; }
+.interval-control { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.compact-input { min-height: 40px; border: 1px solid #dfe1e5; border-radius: 11px; background: #fff; padding: 0 10px; outline: none; font-size: 15px; }
+.compact-input:focus { border-color: #adb1b8; box-shadow: 0 0 0 3px rgba(20,20,20,.045); }
+.number-input { width: 82px; text-align: right; }
+.quiet-toggle { display: flex; align-items: center; gap: 7px; cursor: pointer; font-weight: 800; font-size: 13px; }
+.quiet-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+.quiet-times { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: end; padding: 12px 16px 16px; border-top: 1px solid var(--line); }
+.quiet-times label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.quiet-times .compact-input { width: 100%; }
+.quiet-times.disabled { opacity: .45; }
+.quiet-arrow { color: var(--muted); padding-bottom: 10px; font-weight: 800; }

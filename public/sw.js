@@ -1,4 +1,4 @@
-const CACHE = 'mochi-v4';
+const CACHE = 'mochi-v5';
 const ASSETS = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));

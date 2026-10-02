@@ -13,7 +13,6 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
 const publishableMap = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}");
 const PUBLISHABLE_KEY = publishableMap.default || Deno.env.get("SUPABASE_ANON_KEY") || "";
-const REMINDER_INTERVAL_MS = 5 * 60 * 1000;
 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails("mailto:admin@example.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -38,6 +37,12 @@ function tokyoParts(date = new Date()) {
   };
 }
 
+function isQuietTime(now: string, start: string, end: string) {
+  if (start === end) return false;
+  if (start < end) return now >= start && now < end;
+  return now >= start || now < end;
+}
+
 Deno.serve(async (req) => {
   const apiKey = req.headers.get("apikey") || "";
   if (!PUBLISHABLE_KEY || apiKey !== PUBLISHABLE_KEY) {
@@ -59,7 +64,30 @@ Deno.serve(async (req) => {
       .order("task_time");
     if (error) throw error;
 
+    const userIds = [...new Set((candidates || []).map((task: any) => task.user_id))];
+    const preferenceMap = new Map<string, any>();
+
+    if (userIds.length) {
+      const { data: preferences, error: preferenceError } = await admin
+        .from("mochi_preferences")
+        .select("user_id,reminder_interval_minutes,quiet_enabled,quiet_start,quiet_end")
+        .in("user_id", userIds);
+      if (preferenceError) throw preferenceError;
+      for (const pref of preferences || []) preferenceMap.set(pref.user_id, pref);
+    }
+
     const tasks = (candidates || []).filter((task: any) => {
+      const pref = preferenceMap.get(task.user_id) || {
+        reminder_interval_minutes: 5,
+        quiet_enabled: false,
+        quiet_start: "22:00",
+        quiet_end: "06:00",
+      };
+
+      const quietStart = String(pref.quiet_start || "22:00").slice(0, 5);
+      const quietEnd = String(pref.quiet_end || "06:00").slice(0, 5);
+      if (pref.quiet_enabled && isQuietTime(now.time, quietStart, quietEnd)) return false;
+
       const taskTime = String(task.task_time).slice(0, 5);
       const hasReachedFirstReminder =
         task.task_date < now.date ||
@@ -67,9 +95,10 @@ Deno.serve(async (req) => {
       if (!hasReachedFirstReminder) return false;
 
       if (!task.notified_at) return true;
+      const intervalMinutes = Math.max(1, Math.min(1440, Number(pref.reminder_interval_minutes) || 5));
       const lastNotifiedMs = Date.parse(task.notified_at);
       return Number.isFinite(lastNotifiedMs) &&
-        nowMs - lastNotifiedMs >= REMINDER_INTERVAL_MS;
+        nowMs - lastNotifiedMs >= intervalMinutes * 60 * 1000;
     });
 
     let deliveredTasks = 0;

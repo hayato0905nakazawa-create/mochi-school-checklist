@@ -132,6 +132,14 @@ function taskOut(t: any) {
     createdAt: t.created_at,
   };
 }
+function preferenceOut(p: any) {
+  return {
+    reminderIntervalMinutes: Number(p?.reminder_interval_minutes || 5),
+    quietEnabled: Boolean(p?.quiet_enabled),
+    quietStart: String(p?.quiet_start || "22:00").slice(0, 5),
+    quietEnd: String(p?.quiet_end || "06:00").slice(0, 5),
+  };
+}
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   const url = new URL(req.url);
@@ -164,6 +172,7 @@ Deno.serve(async (req) => {
         if (error.code === "23505") return json(req, { error: "そのIDは使われています" }, 409);
         throw error;
       }
+      await admin.from("mochi_preferences").insert({ user_id: user.id });
       const token = await createSession(user.id);
       return json(req, { ok: true, username: user.username, token });
     }
@@ -189,6 +198,54 @@ Deno.serve(async (req) => {
     }
     if (req.method === "GET" && route === "/me") {
       return json(req, { username: auth.user.username });
+    }
+
+    if (req.method === "GET" && route === "/preferences") {
+      const { data, error } = await admin.from("mochi_preferences")
+        .select("reminder_interval_minutes,quiet_enabled,quiet_start,quiet_end")
+        .eq("user_id", auth.user.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        const { data: created, error: createError } = await admin.from("mochi_preferences")
+          .insert({ user_id: auth.user.id })
+          .select("reminder_interval_minutes,quiet_enabled,quiet_start,quiet_end")
+          .single();
+        if (createError) throw createError;
+        return json(req, { preferences: preferenceOut(created) });
+      }
+      return json(req, { preferences: preferenceOut(data) });
+    }
+
+    if (req.method === "PATCH" && route === "/preferences") {
+      const body = await req.json();
+      const interval = Number(body.reminderIntervalMinutes);
+      const quietEnabled = Boolean(body.quietEnabled);
+      const quietStart = String(body.quietStart || "");
+      const quietEnd = String(body.quietEnd || "");
+
+      if (!Number.isInteger(interval) || interval < 1 || interval > 1440) {
+        return json(req, { error: "通知間隔は1〜1440分で設定してください" }, 400);
+      }
+      if (!validTime(quietStart) || !validTime(quietEnd)) {
+        return json(req, { error: "通知しない時間が正しくありません" }, 400);
+      }
+      if (quietEnabled && quietStart === quietEnd) {
+        return json(req, { error: "通知しない時間の開始と終了は別の時刻にしてください" }, 400);
+      }
+
+      const { data, error } = await admin.from("mochi_preferences").upsert({
+        user_id: auth.user.id,
+        reminder_interval_minutes: interval,
+        quiet_enabled: quietEnabled,
+        quiet_start: quietStart,
+        quiet_end: quietEnd,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" })
+        .select("reminder_interval_minutes,quiet_enabled,quiet_start,quiet_end")
+        .single();
+      if (error) throw error;
+      return json(req, { preferences: preferenceOut(data) });
     }
 
     if (req.method === "GET" && route === "/tasks") {

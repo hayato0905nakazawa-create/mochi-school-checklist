@@ -10,6 +10,12 @@ const state = {
   view: 'list',
   day: 'today',
   tasks: [],
+  preferences: {
+    reminderIntervalMinutes: 5,
+    quietEnabled: false,
+    quietStart: '22:00',
+    quietEnd: '06:00',
+  },
   pushEnabled: false,
   swReg: null,
 };
@@ -65,6 +71,7 @@ async function boot() {
   try {
     const me = await api('/me');
     state.user = me;
+    await loadPreferences();
     await detectPush();
     await loadTasks();
     render();
@@ -103,6 +110,11 @@ async function loadTasks() {
   state.tasks = tasks;
 }
 
+async function loadPreferences() {
+  const { preferences } = await api('/preferences');
+  state.preferences = preferences;
+}
+
 async function renderAuth() {
   const status = await api('/status').catch(() => ({ hasUsers: true, signupOpen: false }));
   const first = !status.hasUsers;
@@ -137,6 +149,7 @@ async function renderAuth() {
       const result = await api(first ? '/register' : '/login', { method: 'POST', body: JSON.stringify(body) });
       if (result.token) localStorage.setItem(AUTH_KEY, result.token);
       state.user = await api('/me');
+      await loadPreferences();
       await detectPush();
       await loadTasks();
       render();
@@ -165,6 +178,7 @@ function render() {
   document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => {
     state.view = btn.dataset.view;
     if (state.view === 'list') await loadTasks();
+    if (state.view === 'settings') await loadPreferences();
     render();
   }));
 
@@ -179,7 +193,7 @@ function taskRows(tasks, overdue = false) {
       <div>
         <div class="task-text">${escapeHtml(task.text)}</div>
         <div class="task-time">${overdue
-          ? `${escapeHtml(task.date.slice(5).replace('-', '/'))} ${escapeHtml(task.time)}から5分ごとに通知中`
+          ? `${escapeHtml(task.date.slice(5).replace('-', '/'))} ${escapeHtml(task.time)}から${state.preferences.reminderIntervalMinutes}分ごとに通知中`
           : `${escapeHtml(task.time)} に通知`}</div>
       </div>
       <button class="task-menu" data-action="menu" aria-label="メニュー">⋯</button>
@@ -322,20 +336,111 @@ function openTaskSheet(task) {
 function renderSettings() {
   const $content = document.querySelector('#content');
   const canPush = 'Notification' in window && 'PushManager' in window && !!state.swReg;
+  const p = state.preferences;
+
   $content.innerHTML = `
     <div class="setting-card">
       <div class="setting-row">
-        <div><div class="setting-main">通知</div><div class="setting-sub">指定時刻から、チェックするまで5分ごと</div></div>
+        <div>
+          <div class="setting-main">通知</div>
+          <div class="setting-sub">指定時刻から、チェックするまで${p.reminderIntervalMinutes}分ごと</div>
+        </div>
         <button id="pushBtn" class="small-btn ${state.pushEnabled ? 'on' : ''}" ${!canPush ? 'disabled' : ''}>${state.pushEnabled ? 'ON' : 'OFF'}</button>
       </div>
+    </div>
+
+    <form id="notificationPrefsForm" class="prefs-form">
+      <div class="setting-card">
+        <div class="setting-row">
+          <div>
+            <div class="setting-main">通知間隔</div>
+            <div class="setting-sub">チェックするまで何分ごとに送るか</div>
+          </div>
+          <div class="interval-control">
+            <input id="reminderInterval" class="compact-input number-input" type="number" min="1" max="1440" step="1" value="${p.reminderIntervalMinutes}" required>
+            <span>分</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-main">通知しない時間</div>
+            <div class="setting-sub">この時間帯は通知を止める</div>
+          </div>
+          <label class="quiet-toggle">
+            <input id="quietEnabled" type="checkbox" ${p.quietEnabled ? 'checked' : ''}>
+            <span>${p.quietEnabled ? 'ON' : 'OFF'}</span>
+          </label>
+        </div>
+
+        <div id="quietTimes" class="quiet-times ${p.quietEnabled ? '' : 'disabled'}">
+          <label>
+            <span>開始</span>
+            <input id="quietStart" class="compact-input" type="time" value="${escapeHtml(p.quietStart)}" ${p.quietEnabled ? '' : 'disabled'}>
+          </label>
+          <div class="quiet-arrow">〜</div>
+          <label>
+            <span>終了</span>
+            <input id="quietEnd" class="compact-input" type="time" value="${escapeHtml(p.quietEnd)}" ${p.quietEnabled ? '' : 'disabled'}>
+          </label>
+        </div>
+      </div>
+
+      <button id="savePrefsBtn" class="primary prefs-save" type="submit">通知設定を保存</button>
+      <div id="prefsError" class="error"></div>
+    </form>
+
+    <div class="setting-card account-card">
       <div class="setting-row">
         <div><div class="setting-main">ログインID</div><div class="setting-sub">${escapeHtml(state.user.username)}</div></div>
       </div>
     </div>
+
     <button id="testPushBtn" class="secondary">テスト通知を送る</button>
     <button id="logoutBtn" class="secondary logout">ログアウト</button>
-    <div class="note">iPhoneで通知を使う場合は、Safariでこのサイトを「ホーム画面に追加」してから通知をONにしてください。</div>`;
+    <div class="note">通知間隔は1〜1440分で設定できます。通知しない時間が終わると、未完了の通知を再開します。</div>`;
+
   if (canPush) document.querySelector('#pushBtn').addEventListener('click', togglePush);
+
+  const quietEnabled = document.querySelector('#quietEnabled');
+  const quietTimes = document.querySelector('#quietTimes');
+  const quietStart = document.querySelector('#quietStart');
+  const quietEnd = document.querySelector('#quietEnd');
+
+  const syncQuietInputs = () => {
+    quietStart.disabled = !quietEnabled.checked;
+    quietEnd.disabled = !quietEnabled.checked;
+    quietTimes.classList.toggle('disabled', !quietEnabled.checked);
+    quietEnabled.nextElementSibling.textContent = quietEnabled.checked ? 'ON' : 'OFF';
+  };
+  quietEnabled.addEventListener('change', syncQuietInputs);
+
+  document.querySelector('#notificationPrefsForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const saveBtn = document.querySelector('#savePrefsBtn');
+    const error = document.querySelector('#prefsError');
+    saveBtn.disabled = true;
+    error.textContent = '';
+
+    try {
+      const result = await api('/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          reminderIntervalMinutes: Number(document.querySelector('#reminderInterval').value),
+          quietEnabled: quietEnabled.checked,
+          quietStart: quietStart.value || '22:00',
+          quietEnd: quietEnd.value || '06:00',
+        }),
+      });
+      state.preferences = result.preferences;
+      renderSettings();
+      toast('通知設定を保存しました');
+    } catch (err) {
+      error.textContent = err.message;
+      saveBtn.disabled = false;
+    }
+  });
+
   document.querySelector('#testPushBtn').addEventListener('click', async () => {
     try {
       const result = await api('/push/test', { method: 'POST', body: '{}' });
@@ -344,6 +449,7 @@ function renderSettings() {
       toast(err.message);
     }
   });
+
   document.querySelector('#logoutBtn').addEventListener('click', async () => {
     try { await api('/logout', { method: 'POST', body: '{}' }); } catch {}
     localStorage.removeItem(AUTH_KEY);
