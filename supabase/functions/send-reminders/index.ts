@@ -13,6 +13,7 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
 const publishableMap = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}");
 const PUBLISHABLE_KEY = publishableMap.default || Deno.env.get("SUPABASE_ANON_KEY") || "";
+const REMINDER_INTERVAL_MS = 5 * 60 * 1000;
 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails("mailto:admin@example.com", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -47,16 +48,29 @@ Deno.serve(async (req) => {
   }
 
   const now = tokyoParts();
+  const nowMs = Date.now();
   try {
-    const { data: tasks, error } = await admin
+    const { data: candidates, error } = await admin
       .from("mochi_tasks")
-      .select("id,user_id,text,task_date,task_time")
+      .select("id,user_id,text,task_date,task_time,notified_at")
       .eq("done", false)
-      .is("notified_at", null)
-      .eq("task_date", now.date)
-      .lte("task_time", `${now.time}:59`)
+      .lte("task_date", now.date)
+      .order("task_date")
       .order("task_time");
     if (error) throw error;
+
+    const tasks = (candidates || []).filter((task: any) => {
+      const taskTime = String(task.task_time).slice(0, 5);
+      const hasReachedFirstReminder =
+        task.task_date < now.date ||
+        (task.task_date === now.date && taskTime <= now.time);
+      if (!hasReachedFirstReminder) return false;
+
+      if (!task.notified_at) return true;
+      const lastNotifiedMs = Date.parse(task.notified_at);
+      return Number.isFinite(lastNotifiedMs) &&
+        nowMs - lastNotifiedMs >= REMINDER_INTERVAL_MS;
+    });
 
     let deliveredTasks = 0;
     let sentPushes = 0;
@@ -74,6 +88,7 @@ Deno.serve(async (req) => {
             title: "持ち物チェック",
             body: `${task.text}、持った？`,
             taskId: task.id,
+            notificationId: `${task.id}-${nowMs}`,
             date: task.task_date,
           }));
           delivered = true;
@@ -91,7 +106,7 @@ Deno.serve(async (req) => {
           .from("mochi_tasks")
           .update({ notified_at: new Date().toISOString() })
           .eq("id", task.id)
-          .is("notified_at", null);
+          .eq("done", false);
         if (updateError) throw updateError;
         deliveredTasks++;
       }

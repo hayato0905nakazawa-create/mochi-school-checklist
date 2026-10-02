@@ -98,7 +98,8 @@ async function detectPush() {
 
 async function loadTasks() {
   const date = state.day === 'today' ? localDate(0) : localDate(1);
-  const { tasks } = await api(`/tasks?date=${encodeURIComponent(date)}`);
+  const overdue = state.day === 'today' ? '&includeOverdue=1' : '';
+  const { tasks } = await api(`/tasks?date=${encodeURIComponent(date)}${overdue}`);
   state.tasks = tasks;
 }
 
@@ -186,7 +187,7 @@ function renderList() {
         ${total ? state.tasks.map(task => `
           <div class="task ${task.done ? 'done' : ''}" data-id="${task.id}">
             <button class="check" data-action="toggle" aria-label="${task.done ? '未完了に戻す' : '完了'}">${task.done ? '✓' : ''}</button>
-            <div><div class="task-text">${escapeHtml(task.text)}</div><div class="task-time">${escapeHtml(task.time)} に通知</div></div>
+            <div><div class="task-text">${escapeHtml(task.text)}</div><div class="task-time">${task.date < localDate(0) ? `${escapeHtml(task.date.slice(5).replace('-', '/'))} ${escapeHtml(task.time)}・未完了` : `${escapeHtml(task.time)} に通知`}</div></div>
             <button class="task-menu" data-action="menu" aria-label="メニュー">⋯</button>
           </div>`).join('') : `
           <div class="empty">
@@ -296,7 +297,7 @@ function renderSettings() {
   $content.innerHTML = `
     <div class="setting-card">
       <div class="setting-row">
-        <div><div class="setting-main">通知</div><div class="setting-sub">指定した時間にスマホへ通知</div></div>
+        <div><div class="setting-main">通知</div><div class="setting-sub">指定時刻から、チェックするまで5分ごと</div></div>
         <button id="pushBtn" class="small-btn ${state.pushEnabled ? 'on' : ''}" ${!canPush ? 'disabled' : ''}>${state.pushEnabled ? 'ON' : 'OFF'}</button>
       </div>
       <div class="setting-row">

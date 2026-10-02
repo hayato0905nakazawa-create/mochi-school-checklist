@@ -1,4 +1,4 @@
-const CACHE = 'mochi-v2';
+const CACHE = 'mochi-v3';
 const ASSETS = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
@@ -21,7 +21,7 @@ self.addEventListener('push', event => {
     body: data.body,
     icon: '/icon.svg',
     badge: '/icon.svg',
-    tag: data.taskId || 'mochi-reminder',
+    tag: data.notificationId || data.taskId || 'mochi-reminder',
     data: { url: '/' },
   }));
 });

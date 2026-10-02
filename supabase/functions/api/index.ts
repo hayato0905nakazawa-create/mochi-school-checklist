@@ -193,14 +193,27 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && route === "/tasks") {
       const date = url.searchParams.get("date") || "";
+      const includeOverdue = url.searchParams.get("includeOverdue") === "1";
+      if (date && !validDate(date)) return json(req, { error: "日付が正しくありません" }, 400);
+
       let q = admin.from("mochi_tasks")
         .select("id,text,task_date,task_time,done,notified_at,created_at")
         .eq("user_id", auth.user.id)
         .order("task_date").order("task_time").order("created_at");
-      if (date) q = q.eq("task_date", date);
+
+      if (date) {
+        q = includeOverdue ? q.lte("task_date", date) : q.eq("task_date", date);
+      }
+
       const { data, error } = await q;
       if (error) throw error;
-      return json(req, { tasks: (data || []).map(taskOut) });
+
+      let rows = data || [];
+      if (date && includeOverdue) {
+        rows = rows.filter((task: any) => task.task_date === date || !task.done);
+      }
+
+      return json(req, { tasks: rows.map(taskOut) });
     }
 
     if (req.method === "POST" && route === "/tasks") {
