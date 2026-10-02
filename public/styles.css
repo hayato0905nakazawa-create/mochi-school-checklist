@@ -44,7 +44,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .segment { display: grid; grid-template-columns: 1fr 1fr; background: #e9eaed; padding: 4px; border-radius: 14px; margin: 4px 0 16px; }
 .segment button { min-height: 40px; border: 0; border-radius: 11px; background: transparent; color: #666b73; font-weight: 800; cursor: pointer; }
 .segment button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 5px rgba(0,0,0,.06); }
+.section-label { display: flex; justify-content: space-between; align-items: center; margin: 16px 4px 8px; color: var(--muted); font-size: 13px; font-weight: 800; }
+.section-label:first-of-type { margin-top: 4px; }
+.overdue-label { color: var(--accent-dark); }
 .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.overdue-card { border: 1px solid rgba(255, 51, 75, .18); margin-bottom: 18px; }
+.overdue-task .task-time { color: var(--accent-dark); font-weight: 700; }
 .card-head { padding: 18px 18px 10px; display: flex; justify-content: space-between; align-items: baseline; }
 .card-title { font-weight: 800; font-size: 17px; }
 .card-count { color: var(--muted); font-size: 13px; }

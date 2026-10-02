@@ -172,32 +172,58 @@ function render() {
   else renderList();
 }
 
+function taskRows(tasks, overdue = false) {
+  return tasks.map(task => `
+    <div class="task ${task.done ? 'done' : ''} ${overdue ? 'overdue-task' : ''}" data-id="${task.id}">
+      <button class="check" data-action="toggle" aria-label="${task.done ? '未完了に戻す' : '完了'}">${task.done ? '✓' : ''}</button>
+      <div>
+        <div class="task-text">${escapeHtml(task.text)}</div>
+        <div class="task-time">${overdue
+          ? `${escapeHtml(task.date.slice(5).replace('-', '/'))} ${escapeHtml(task.time)}から5分ごとに通知中`
+          : `${escapeHtml(task.time)} に通知`}</div>
+      </div>
+      <button class="task-menu" data-action="menu" aria-label="メニュー">⋯</button>
+    </div>`).join('');
+}
+
+function emptyBlock(text = '＋から、忘れたくないものを追加できます。') {
+  return `
+    <div class="empty">
+      <div class="empty-icon">✓</div>
+      <div class="empty-title">まだ何もありません</div>
+      <div class="empty-sub">${text}</div>
+    </div>`;
+}
+
 function renderList() {
   const $content = document.querySelector('#content');
-  const done = state.tasks.filter(t => t.done).length;
-  const total = state.tasks.length;
+  const today = localDate(0);
+  const isToday = state.day === 'today';
+  const overdueTasks = isToday ? state.tasks.filter(t => t.date < today && !t.done) : [];
+  const dayTasks = isToday ? state.tasks.filter(t => t.date === today) : state.tasks;
+  const dayDone = dayTasks.filter(t => t.done).length;
+
   $content.innerHTML = `
     <div class="segment">
       <button data-day="today" class="${state.day === 'today' ? 'active' : ''}">今日</button>
       <button data-day="tomorrow" class="${state.day === 'tomorrow' ? 'active' : ''}">明日</button>
     </div>
+
+    ${isToday && overdueTasks.length ? `
+      <div class="section-label overdue-label"><span>🔔 未完了</span><span>${overdueTasks.length}件</span></div>
+      <div class="card overdue-card">
+        <div class="list">${taskRows(overdueTasks, true)}</div>
+      </div>
+    ` : ''}
+
+    <div class="section-label"><span>${isToday ? '今日' : '明日'}</span><span>${dayTasks.length ? `${dayDone}/${dayTasks.length}` : ''}</span></div>
     <div class="card">
-      <div class="card-head"><div class="card-title">持ち物</div><div class="card-count">${total ? `${done}/${total}` : ''}</div></div>
       <div class="list">
-        ${total ? state.tasks.map(task => `
-          <div class="task ${task.done ? 'done' : ''}" data-id="${task.id}">
-            <button class="check" data-action="toggle" aria-label="${task.done ? '未完了に戻す' : '完了'}">${task.done ? '✓' : ''}</button>
-            <div><div class="task-text">${escapeHtml(task.text)}</div><div class="task-time">${task.date < localDate(0) ? `${escapeHtml(task.date.slice(5).replace('-', '/'))} ${escapeHtml(task.time)}・未完了` : `${escapeHtml(task.time)} に通知`}</div></div>
-            <button class="task-menu" data-action="menu" aria-label="メニュー">⋯</button>
-          </div>`).join('') : `
-          <div class="empty">
-            <div class="empty-icon">✓</div>
-            <div class="empty-title">まだ何もありません</div>
-            <div class="empty-sub">＋から、忘れたくないものを追加できます。</div>
-          </div>`}
+        ${dayTasks.length ? taskRows(dayTasks) : emptyBlock(isToday && overdueTasks.length ? '今日の持ち物はまだありません。' : undefined)}
       </div>
     </div>
-    ${total > 0 && done === total ? '<div class="complete"><span class="complete-dot">✓</span>準備完了！</div>' : ''}`;
+
+    ${dayTasks.length > 0 && dayDone === dayTasks.length ? '<div class="complete"><span class="complete-dot">✓</span>準備完了！</div>' : ''}`;
 
   document.querySelectorAll('[data-day]').forEach(btn => btn.addEventListener('click', async () => {
     state.day = btn.dataset.day;
@@ -212,6 +238,8 @@ function renderList() {
     render();
     try {
       await api(`/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ done: task.done }) });
+      await loadTasks();
+      render();
     } catch (err) { task.done = !task.done; toast(err.message); await loadTasks(); render(); }
   }));
   document.querySelectorAll('[data-action="menu"]').forEach(btn => btn.addEventListener('click', e => {
